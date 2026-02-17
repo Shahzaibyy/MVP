@@ -1,8 +1,9 @@
 # ── Stage 1: Prowler installer ────────────────────────────────────────────────
 FROM python:3.11-slim AS prowler-builder
 
+# Build dependencies needed for Prowler (netifaces, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        gcc libssl-dev curl \
+        build-essential gcc libssl-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/prowler-venv \
