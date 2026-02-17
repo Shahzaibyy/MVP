@@ -10,6 +10,7 @@ import logging
 import os
 from datetime import datetime
 from typing import Optional, List
+import re  
 
 import psycopg2
 import psycopg2.extras
@@ -179,8 +180,9 @@ def run_trivy(image: str = TRIVY_IMAGE) -> List[dict]:
     logger.info(f"[Trivy] Found {len(findings)} vulnerabilities.")
     return findings
 
+
 def run_prowler() -> List[dict]:
-    """Run Prowler and parse OCSF results for Database storage."""
+    """Run Prowler and parse OCSF results using robust regex for line-by-line parsing."""
     logger.info("[Prowler] Starting Azure scan…")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -217,9 +219,15 @@ def run_prowler() -> List[dict]:
     try:
         with open(latest_file, "r") as f:
             for line in f:
-                if not line.strip(): continue
+                line = line.strip()
+                if not line: continue
+                
                 try:
-                    item = json.loads(line)
+                    match = re.search(r'(\{.*\})', line)
+                    if not match: continue
+                    
+                    item = json.loads(match.group(1))
+               
                     status_code = str(item.get("status_code", "PASS")).upper()
                     
                     if status_code == "FAIL":
@@ -227,18 +235,21 @@ def run_prowler() -> List[dict]:
                             "tool_name":   "Prowler",
                             "scan_target": "Azure-Subscription",
                             "severity":    str(item.get("severity", "MEDIUM")).upper(),
-                            "title":       item.get("finding_info", {}).get("title") or "Azure Security Finding",
+                            "title":       item.get("finding_info", {}).get("title") or item.get("status_detail")[:100],
                             "description": item.get("status_detail") or "", 
                             "resource_id": (item.get("resources", [{}])[0].get("name") if item.get("resources") else "Azure-Resource"),
                             "status":      "FAIL",
                             "raw_data":    item 
                         })
-                except: continue
+                except:
+                    continue
     except Exception as e:
         logger.error(f"[Prowler] Parsing error: {e}")
 
     logger.info(f"[Prowler] Successfully parsed {len(findings)} issues for Database.")
     return findings
+
+
 # ─── Background Scan Task ─────────────────────────────────────────────────────
 def run_full_scan(image: str):
     logger.info("=== Full security scan starting ===")
