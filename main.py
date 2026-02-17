@@ -151,7 +151,7 @@ def run_trivy(image: str = TRIVY_IMAGE) -> List[dict]:
         capture_output=True, text=True,
     )
 
-    if result.returncode not in (0, 1):        # 1 = vulns found (expected)
+    if result.returncode not in (0, 1):       
         logger.error(f"[Trivy] Error: {result.stderr}")
         return []
 
@@ -187,86 +187,80 @@ def run_prowler() -> List[dict]:
     
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+
     for old_file in glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*"):
         try:
             os.remove(old_file)
-        except Exception as e:
-            logger.warning(f"Could not remove old file {old_file}: {e}")
+        except:
+            pass
 
-    creds = {
-        "AZURE_CLIENT_ID": os.getenv("AZURE_CLIENT_ID"),
-        "AZURE_CLIENT_SECRET": os.getenv("AZURE_CLIENT_SECRET"),
-        "AZURE_TENANT_ID": os.getenv("AZURE_TENANT_ID"),
-        "AZURE_SUBSCRIPTION_ID": os.getenv("AZURE_SUBSCRIPTION_ID"),
-    }
-    
-    if not all(creds.values()):
-        logger.error(f"[Prowler] Missing Azure Credentials: { {k: ('Set' if v else 'Missing') for k, v in creds.items()} }")
-        return []
 
     try:
         result = subprocess.run(
             [
                 PROWLER_VENV, "azure",
-                "--output-formats", "json",
+                "--sp-env-auth",         
+                "--output-formats", "json-ocsf", 
                 "--output-directory", OUTPUT_DIR,
                 "--output-filename", "prowler-output-azure",
                 "--quiet" 
             ],
             capture_output=True, 
             text=True,
-            env={**os.environ, **creds},
+            env={
+                **os.environ,
+                "AZURE_CLIENT_ID":       os.getenv("AZURE_CLIENT_ID", ""),
+                "AZURE_CLIENT_SECRET":   os.getenv("AZURE_CLIENT_SECRET", ""),
+                "AZURE_TENANT_ID":       os.getenv("AZURE_TENANT_ID", ""),
+                "AZURE_SUBSCRIPTION_ID": os.getenv("AZURE_SUBSCRIPTION_ID", ""),
+            },
             timeout=600 
         )
         
         if result.returncode != 0:
-            logger.error(f"[Prowler] Execution failed with return code {result.returncode}")
-            logger.error(f"[Prowler] STDERR: {result.stderr}")
+            logger.error(f"[Prowler] Error Log: {result.stderr}")
             
-    except subprocess.TimeoutExpired:
-        logger.error("[Prowler] Scan timed out after 10 minutes.")
-        return []
     except Exception as e:
-        logger.error(f"[Prowler] Subprocess error: {e}")
+        logger.error(f"[Prowler] Execution error: {e}")
         return []
+
 
     json_files = glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*.json")
     
     if not json_files:
-        logger.error(f"[Prowler] No JSON output file found in {OUTPUT_DIR}")
-        logger.info(f"Current Directory Contents: {os.listdir(OUTPUT_DIR)}")
+        logger.error(f"[Prowler] No JSON output file found. Content: {os.listdir(OUTPUT_DIR)}")
         return []
 
     latest_file = max(json_files, key=os.path.getctime)
-    logger.info(f"[Prowler] Reading latest findings from: {latest_file}")
+    logger.info(f"[Prowler] Reading from: {latest_file}")
 
     try:
         with open(latest_file, "r") as f:
             raw = json.load(f)
     except Exception as e:
-        logger.error(f"[Prowler] JSON parse error: {e}")
+        logger.error(f"[Prowler] JSON Load Error: {e}")
         return []
 
-    # 5. Parse Findings
     items = raw if isinstance(raw, list) else raw.get("findings", [])
     findings = []
     
     for item in items:
-        status_val = str(item.get("status", item.get("Status", "FAIL"))).upper()
+
+        status_val = str(item.get("status", "FAIL")).upper()
         
         if status_val in ["FAIL", "WARNING"]:
             findings.append({
                 "tool_name":   "Prowler",
                 "scan_target": "Azure-Subscription",
-                "severity":    str(item.get("severity", item.get("Severity", "MEDIUM"))).upper(),
-                "title":       item.get("check_title") or item.get("CheckTitle") or item.get("check_id", "Unknown Check"),
-                "description": item.get("description") or item.get("Description", ""),
-                "resource_id": item.get("resource_id") or item.get("resource_name") or "Azure-Resource",
+                "severity":    str(item.get("severity", "MEDIUM")).upper(),
+                "title":       item.get("check_title") or item.get("check_id") or "Security Check",
+                "description": item.get("description") or "",
+                "resource_id": item.get("resource_id") or "Azure-Resource",
                 "status":      status_val,
                 "raw_data":    item,
             })
 
-    logger.info(f"[Prowler] Successfully parsed {len(findings)} FAIL/WARNING findings.")
+    logger.info(f"[Prowler] Parsed {len(findings)} issues.")
     return findings
 
 # ─── Background Scan Task ─────────────────────────────────────────────────────
