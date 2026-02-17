@@ -230,7 +230,7 @@ def run_prowler() -> List[dict]:
 
     findings = []
     for item in items:
-        status_val = str(item.get("status", item.get("Status", "FAIL"))).upper()ss
+        status_val = str(item.get("status", item.get("Status", "FAIL"))).upper()
         
         if status_val in ["FAIL", "WARNING"]:
             findings.append({
