@@ -184,17 +184,16 @@ def run_trivy(image: str = TRIVY_IMAGE) -> List[dict]:
 
 
 def run_prowler() -> List[dict]:
-    """Robust NDJSON parser for Prowler v4 OCSF output."""
+    """Run Prowler and parse Standard JSON List output."""
     logger.info("[Prowler] Starting Azure scan…")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-
+    # Clean old files
     for old_file in glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*"):
         try: os.remove(old_file)
         except: pass
 
     try:
-
         subprocess.run(
             [
                 PROWLER_VENV, "azure",
@@ -212,54 +211,38 @@ def run_prowler() -> List[dict]:
 
     json_files = glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*.ocsf.json")
     if not json_files:
-        logger.error("[Prowler] Output file not found!")
         return []
 
     latest_file = max(json_files, key=os.path.getctime)
     findings = []
     
-
     try:
         with open(latest_file, "r") as f:
-            for line_no, line in enumerate(f, 1):
-                clean_line = line.strip()
-                if not clean_line: continue
-                
-                try:
-
-                    match = re.search(r'(\{.*\})', clean_line)
-                    if not match:
-                        continue
-                        
-                    item = json.loads(match.group(1))
+            data = json.load(f)
+            
+            if isinstance(data, list):
+                for item in data:
+                    status_code = str(item.get("status_code", "PASS")).upper()
                     
-
-                    status = str(item.get("status_code", "")).upper()
-                    
-                    if status == "FAIL":
-
-                        f_info = item.get("finding_info", {})
-                        res = item.get("resources", [{}])[0]
-                        
+                    if status_code == "FAIL":
                         findings.append({
                             "tool_name":   "Prowler",
                             "scan_target": "Azure-Subscription",
                             "severity":    str(item.get("severity", "MEDIUM")).upper(),
-                            "title":       f_info.get("title") or item.get("status_detail", "Azure Finding")[:100],
-                            "description": item.get("status_detail") or f_info.get("desc") or "", 
-                            "resource_id": res.get("name") or res.get("uid") or "Azure-Resource",
+                            "title":       item.get("finding_info", {}).get("title") or item.get("message")[:100],
+                            "description": item.get("status_detail") or item.get("message") or "",
+                            "resource_id": (item.get("resources", [{}])[0].get("name") if item.get("resources") else "Azure-Resource"),
                             "status":      "FAIL",
                             "raw_data":    item 
                         })
-                except Exception as line_err:
-                    continue
-                    
+            else:
+                logger.error("[Prowler] Data is not a list!")
+                
     except Exception as e:
-        logger.error(f"[Prowler] Global file reading error: {e}")
+        logger.error(f"[Prowler] Parsing error: {e}")
 
     logger.info(f"[Prowler] Successfully parsed {len(findings)} issues for Database.")
     return findings
-
 
 # ─── Background Scan Task ─────────────────────────────────────────────────────
 def run_full_scan(image: str):
