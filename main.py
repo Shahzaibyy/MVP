@@ -192,7 +192,7 @@ def run_prowler() -> List[dict]:
             pass
 
     try:
-
+        # Prowler Command
         result = subprocess.run(
             [
                 PROWLER_VENV, "azure",
@@ -208,9 +208,6 @@ def run_prowler() -> List[dict]:
             timeout=600 
         )
         
-        if result.returncode != 0:
-            logger.error(f"[Prowler] Execution Error: {result.stderr}")
-            
     except Exception as e:
         logger.error(f"[Prowler] Subprocess error: {e}")
         return []
@@ -226,38 +223,47 @@ def run_prowler() -> List[dict]:
     findings = []
     try:
         with open(latest_file, "r") as f:
-
             for line in f:
                 line = line.strip()
-                if not line:
-                    continue
+                if not line or line == '[]': continue 
+                
                 try:
-                    item = json.loads(line)
+                    data = json.loads(line)
                     
+
+                    item = data[0] if isinstance(data, list) and len(data) > 0 else data
+                    
+
+                    if not isinstance(item, dict):
+                        continue
+
 
                     status_code = str(item.get("status_code", "")).upper()
                     
-    
                     if "PASS" not in status_code and "SUCCESS" not in status_code:
+
+                        finding_info = item.get("finding_info", {})
+                        metadata = item.get("metadata", {})
+                        
                         findings.append({
                             "tool_name":   "Prowler",
                             "scan_target": "Azure-Subscription",
                             "severity":    str(item.get("severity", "MEDIUM")).upper(),
-                            "title":       item.get("metadata", {}).get("product", {}).get("feature", {}).get("name") or 
-                                           item.get("finding_info", {}).get("title") or "Azure Finding",
-                            "description": item.get("finding_info", {}).get("desc") or item.get("message") or "",
+                            "title":       finding_info.get("title") or item.get("message") or "Azure Finding",
+                            "description": finding_info.get("desc") or item.get("message") or "",
                             "resource_id": (item.get("resources", [{}])[0].get("name") if item.get("resources") else "Azure-Resource"),
                             "status":      "FAIL",
                             "raw_data":    item,
                         })
-                except json.JSONDecodeError:
-                    continue 
+                except (json.JSONDecodeError, TypeError, AttributeError) as e:
+                    continue
                     
     except Exception as e:
         logger.error(f"[Prowler] Parsing error: {e}")
 
     logger.info(f"[Prowler] Successfully parsed {len(findings)} issues.")
     return findings
+
 # ─── Background Scan Task ─────────────────────────────────────────────────────
 def run_full_scan(image: str):
     logger.info("=== Full security scan starting ===")
