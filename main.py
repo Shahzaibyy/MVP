@@ -198,12 +198,12 @@ def run_prowler() -> List[dict]:
     try:
         result = subprocess.run(
             [
-                PROWLER_VENV, "azure",
-                "--sp-env-auth",         
+                PROWLER_VENV, 
+                "azure",
+                "--sp-env-auth",        
                 "--output-formats", "json-ocsf", 
                 "--output-directory", OUTPUT_DIR,
                 "--output-filename", "prowler-output-azure",
-                "--quiet" 
             ],
             capture_output=True, 
             text=True,
