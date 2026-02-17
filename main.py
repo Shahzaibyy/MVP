@@ -9,7 +9,7 @@ import glob
 import logging
 import os
 from datetime import datetime
-from typing import Optional, List, Listv
+from typing import Optional, List
 import re  
 
 
