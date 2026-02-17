@@ -180,20 +180,18 @@ def run_trivy(image: str = TRIVY_IMAGE) -> List[dict]:
     return findings
 
 def run_prowler() -> List[dict]:
-    """Run Prowler against Azure and return parsed findings."""
+    """Run Prowler and parse OCSF results for Database storage."""
     logger.info("[Prowler] Starting Azure scan…")
-    
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+
     for old_file in glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*"):
-        try:
-            os.remove(old_file)
-        except:
-            pass
+        try: os.remove(old_file)
+        except: pass
 
     try:
-        # Prowler Command
-        result = subprocess.run(
+
+        subprocess.run(
             [
                 PROWLER_VENV, "azure",
                 "--sp-env-auth",
@@ -202,68 +200,45 @@ def run_prowler() -> List[dict]:
                 "--output-directory", OUTPUT_DIR,
                 "--output-filename", "prowler-output-azure",
             ],
-            capture_output=True, 
-            text=True,
-            env=os.environ.copy(),
-            timeout=600 
+            capture_output=True, text=True, env=os.environ.copy(), timeout=600 
         )
-        
     except Exception as e:
-        logger.error(f"[Prowler] Subprocess error: {e}")
+        logger.error(f"[Prowler] Execution error: {e}")
         return []
 
-    json_files = glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*.json")
+
+    json_files = glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*.ocsf.json")
     if not json_files:
-        logger.error(f"[Prowler] No JSON file found.")
         return []
 
     latest_file = max(json_files, key=os.path.getctime)
-    logger.info(f"[Prowler] Parsing file: {latest_file}")
-
     findings = []
+    
     try:
         with open(latest_file, "r") as f:
             for line in f:
-                line = line.strip()
-                if not line or line == '[]': continue 
-                
+                if not line.strip(): continue
                 try:
-                    data = json.loads(line)
+                    item = json.loads(line)
+                    status_code = str(item.get("status_code", "PASS")).upper()
                     
-
-                    item = data[0] if isinstance(data, list) and len(data) > 0 else data
-                    
-
-                    if not isinstance(item, dict):
-                        continue
-
-
-                    status_code = str(item.get("status_code", "")).upper()
-                    
-                    if "PASS" not in status_code and "SUCCESS" not in status_code:
-
-                        finding_info = item.get("finding_info", {})
-                        metadata = item.get("metadata", {})
-                        
+                    if status_code == "FAIL":
                         findings.append({
                             "tool_name":   "Prowler",
                             "scan_target": "Azure-Subscription",
                             "severity":    str(item.get("severity", "MEDIUM")).upper(),
-                            "title":       finding_info.get("title") or item.get("message") or "Azure Finding",
-                            "description": finding_info.get("desc") or item.get("message") or "",
+                            "title":       item.get("finding_info", {}).get("title") or "Azure Security Finding",
+                            "description": item.get("status_detail") or "", 
                             "resource_id": (item.get("resources", [{}])[0].get("name") if item.get("resources") else "Azure-Resource"),
                             "status":      "FAIL",
-                            "raw_data":    item,
+                            "raw_data":    item 
                         })
-                except (json.JSONDecodeError, TypeError, AttributeError) as e:
-                    continue
-                    
+                except: continue
     except Exception as e:
         logger.error(f"[Prowler] Parsing error: {e}")
 
-    logger.info(f"[Prowler] Successfully parsed {len(findings)} issues.")
+    logger.info(f"[Prowler] Successfully parsed {len(findings)} issues for Database.")
     return findings
-
 # ─── Background Scan Task ─────────────────────────────────────────────────────
 def run_full_scan(image: str):
     logger.info("=== Full security scan starting ===")

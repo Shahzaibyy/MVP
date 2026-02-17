@@ -60,6 +60,7 @@ services:
       DB_NAME:     security_mvp
       DB_USER:     security_user
       DB_PASSWORD: StrongPass123!
+      
 
       # ── Azure Service Principal (fill these in for Prowler) ───────────────
       AZURE_CLIENT_ID:       ${AZURE_CLIENT_ID:-}
@@ -71,7 +72,7 @@ services:
       TRIVY_IMAGE:  ${TRIVY_IMAGE:-python:3.7-slim}
       PROWLER_VENV: /opt/prowler-venv/bin/prowler
     volumes:
-      - scan-results:/app/scan-results
+      - ./scan-results:/app/scan-results
     ports:
       - "8000:8000"
     # Allow Trivy to pull images (needs Docker socket) — OPTIONAL
