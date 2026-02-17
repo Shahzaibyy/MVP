@@ -1,0 +1,100 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Security MVP Stack
+#  Services:  postgres | api | grafana
+#  Usage:     docker-compose up -d
+#  Dashboard: http://<your-vm-ip>:3000   (admin / admin)
+#  API Docs:  http://<your-vm-ip>:8000/docs
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  security-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  grafana-data:
+  scan-results:
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: security-postgres
+    restart: unless-stopped
+    networks:
+      - security-net
+    environment:
+      POSTGRES_DB:       security_mvp
+      POSTGRES_USER:     security_user
+      POSTGRES_PASSWORD: StrongPass123!
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql   # auto-runs on first boot
+    ports:
+      - "5432:5432"        # remove this line in production (no external DB exposure)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U security_user -d security_mvp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI (Prowler + Trivy scanner) ───────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: security-api
+    restart: unless-stopped
+    networks:
+      - security-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # ── Database ──────────────────────────────────────────────────────────
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_NAME:     security_mvp
+      DB_USER:     security_user
+      DB_PASSWORD: StrongPass123!
+
+      # ── Azure Service Principal (fill these in for Prowler) ───────────────
+      AZURE_CLIENT_ID:       ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET:   ${AZURE_CLIENT_SECRET:-}
+      AZURE_TENANT_ID:       ${AZURE_TENANT_ID:-}
+      AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
+
+      # ── Scan config ───────────────────────────────────────────────────────
+      TRIVY_IMAGE:  ${TRIVY_IMAGE:-python:3.7-slim}
+      PROWLER_VENV: /opt/prowler-venv/bin/prowler
+    volumes:
+      - scan-results:/app/scan-results
+    ports:
+      - "8000:8000"
+    # Allow Trivy to pull images (needs Docker socket) — OPTIONAL
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock
+
+  # ── Grafana ─────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: security-grafana
+    restart: unless-stopped
+    networks:
+      - security-net
+    depends_on:
+      - postgres
+    environment:
+      GF_SECURITY_ADMIN_USER:     admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS:         grafana-clock-panel,grafana-piechart-panel
+      # Auto-provision the PostgreSQL datasource
+      GF_DATASOURCES_DEFAULT_NAME: PostgreSQL
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning   # datasource + dashboard auto-provision
+    ports:
+      - "3000:3000"

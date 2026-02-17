@@ -1,0 +1,20 @@
+apiVersion: 1
+
+datasources:
+  - name: SecurityDB
+    type: postgres
+    uid: security-postgres
+    url: postgres:5432
+    user: grafana_reader
+    secureJsonData:
+      password: "GrafanaRead123!"
+    jsonData:
+      database:         security_mvp
+      sslmode:          disable
+      maxOpenConns:     5
+      maxIdleConns:     5
+      connMaxLifetime:  14400
+      postgresVersion:  1600
+      timescaledb:      false
+    isDefault: true
+    editable: false
