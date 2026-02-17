@@ -185,12 +185,19 @@ def run_prowler() -> List[dict]:
     """Run Prowler against Azure and return parsed findings."""
     logger.info("[Prowler] Starting Azure scan…")
 
+    for old_file in glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*"):
+        try:
+            os.remove(old_file)
+        except:
+            pass
+
     result = subprocess.run(
         [
             PROWLER_VENV, "azure",
             "--output-formats", "json",
             "--output-directory", OUTPUT_DIR,
             "--output-filename", "prowler-output-azure",
+            "--quiet" 
         ],
         capture_output=True, text=True,
         env={
@@ -202,37 +209,43 @@ def run_prowler() -> List[dict]:
         },
     )
 
-    # Prowler exits non-zero when it finds issues — that's normal
     json_files = glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*.json")
+    
     if not json_files:
-        logger.error("[Prowler] No JSON output file found.")
+        logger.error(f"[Prowler] No JSON output file found in {OUTPUT_DIR}")
+        logger.info(f"Directory contents: {os.listdir(OUTPUT_DIR)}")
         return []
 
+    latest_file = max(json_files, key=os.path.getctime)
+    logger.info(f"[Prowler] Reading latest findings from: {latest_file}")
+
     try:
-        with open(sorted(json_files)[-1]) as f:
+        with open(latest_file, "r") as f:
             raw = json.load(f)
-    except json.JSONDecodeError as e:
-        logger.error(f"[Prowler] JSON parse error: {e}")
+    except Exception as e:
+        logger.error(f"[Prowler] JSON parse error or file read error: {e}")
         return []
 
     items = raw if isinstance(raw, list) else raw.get("findings", [])
 
     findings = []
     for item in items:
-        findings.append({
-            "tool_name":   "Prowler",
-            "scan_target": "Azure-Subscription",
-            "severity":    str(item.get("severity", "MEDIUM")).upper(),
-            "title":       item.get("check_title") or item.get("checkID", ""),
-            "description": item.get("description", ""),
-            "resource_id": item.get("resource_id") or item.get("resourceId", ""),
-            "status":      str(item.get("status", "FAIL")).upper(),
-            "raw_data":    item,
-        })
+        status_val = str(item.get("status", item.get("Status", "FAIL"))).upper()ss
+        
+        if status_val in ["FAIL", "WARNING"]:
+            findings.append({
+                "tool_name":   "Prowler",
+                "scan_target": "Azure-Subscription",
+                "severity":    str(item.get("severity", item.get("Severity", "MEDIUM"))).upper(),
+                "title":       item.get("check_title") or item.get("CheckTitle", item.get("check_id", "")),
+                "description": item.get("description", item.get("Description", "")),
+                "resource_id": item.get("resource_id") or item.get("resource_name", "Azure-Resource"),
+                "status":      status_val,
+                "raw_data":    item,
+            })
 
-    logger.info(f"[Prowler] Found {len(findings)} findings.")
+    logger.info(f"[Prowler] Successfully parsed {len(findings)} FAIL/WARNING findings.")
     return findings
-
 
 # ─── Background Scan Task ─────────────────────────────────────────────────────
 def run_full_scan(image: str):
