@@ -192,7 +192,7 @@ def run_prowler() -> List[dict]:
             pass
 
     try:
- 
+
         result = subprocess.run(
             [
                 PROWLER_VENV, "azure",
@@ -209,48 +209,54 @@ def run_prowler() -> List[dict]:
         )
         
         if result.returncode != 0:
-            logger.error(f"[Prowler] Error Log: {result.stderr}")
+            logger.error(f"[Prowler] Execution Error: {result.stderr}")
             
     except Exception as e:
-        logger.error(f"[Prowler] Execution error: {e}")
+        logger.error(f"[Prowler] Subprocess error: {e}")
         return []
 
     json_files = glob.glob(f"{OUTPUT_DIR}/prowler-output-azure*.json")
-    
     if not json_files:
-        logger.error(f"[Prowler] No JSON file found. Dir content: {os.listdir(OUTPUT_DIR)}")
+        logger.error(f"[Prowler] No JSON file found.")
         return []
 
     latest_file = max(json_files, key=os.path.getctime)
-    logger.info(f"[Prowler] Reading OCSF findings from: {latest_file}")
+    logger.info(f"[Prowler] Parsing file: {latest_file}")
 
     findings = []
     try:
         with open(latest_file, "r") as f:
 
             for line in f:
-                if not line.strip(): continue
-                item = json.loads(line)
-                
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                    
 
-                status_val = str(item.get("status", "Unknown")).upper()
-                
-             
-                if status_val not in ["SUCCESS", "PASS", "INFORMATIONAL"]:
-                    findings.append({
-                        "tool_name":   "Prowler",
-                        "scan_target": "Azure-Subscription",
-                        "severity":    str(item.get("severity", "MEDIUM")).upper(),
-                        "title":       item.get("finding_info", {}).get("title") or item.get("message") or "Azure Finding",
-                        "description": item.get("finding_info", {}).get("desc") or "",
-                        "resource_id": item.get("resources", [{}])[0].get("name") or "Azure-Resource",
-                        "status":      "FAIL", 
-                        "raw_data":    item,
-                    })
+                    status_code = str(item.get("status_code", "")).upper()
+                    
+    
+                    if "PASS" not in status_code and "SUCCESS" not in status_code:
+                        findings.append({
+                            "tool_name":   "Prowler",
+                            "scan_target": "Azure-Subscription",
+                            "severity":    str(item.get("severity", "MEDIUM")).upper(),
+                            "title":       item.get("metadata", {}).get("product", {}).get("feature", {}).get("name") or 
+                                           item.get("finding_info", {}).get("title") or "Azure Finding",
+                            "description": item.get("finding_info", {}).get("desc") or item.get("message") or "",
+                            "resource_id": (item.get("resources", [{}])[0].get("name") if item.get("resources") else "Azure-Resource"),
+                            "status":      "FAIL",
+                            "raw_data":    item,
+                        })
+                except json.JSONDecodeError:
+                    continue 
+                    
     except Exception as e:
-        logger.error(f"[Prowler] Error during OCSF parsing: {e}")
+        logger.error(f"[Prowler] Parsing error: {e}")
 
-    logger.info(f"[Prowler] Successfully parsed {len(findings)} FAIL/WARNING issues.")
+    logger.info(f"[Prowler] Successfully parsed {len(findings)} issues.")
     return findings
 # ─── Background Scan Task ─────────────────────────────────────────────────────
 def run_full_scan(image: str):
